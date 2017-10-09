@@ -4,13 +4,35 @@
 #include <sys/ioctl.h>
 
 void usage() {
-  printf("syntax: arp_send <interface> <send ip> <target ip>\n");
-  printf("sample: arp_send wlan0 <192.168.43.117> <192.168.43.1>\n");
+	printf("syntax: arp_send <interface> <send ip> <target ip>\n");
+	printf("sample: arp_send wlan0 <192.168.43.117> <192.168.43.1>\n");
 }
 
 int getIPaddr(char *ip_addr) {
 	int sock;
-	struct ifreq
+	struct ifreq ifr;
+	struct sockaddr_in *sin;
+	
+	sock = socket(AF_INET, SOCK_STREAM, 0);
+	if (sock < 0)
+	{
+		dp(4, "socket");
+		return 0;
+	}
+
+	strcpy(ifr.ifr_name, "eth0");
+	if (ioctl(sock, SIOCGIFADDR, &ifr)< 0)  
+	{
+		dp(4, "ioctl() - get ip");
+		close(sock);
+		return 0;
+	}
+	
+	sin = (struct sockaddr_in*)&ifr.ifr_addr;
+	strcpy(ip_addr, inet_ntoa(sin->sin_addr));
+	
+	close(sock);
+	return 1;
 }
 
 int main(int argc, char* argv[]) {
